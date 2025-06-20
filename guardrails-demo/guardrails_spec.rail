@@ -1,0 +1,9 @@
+<rail version="0.1">
+  <output>
+    <string name="answer">
+      <no-profanity/>
+      <regex pattern="^(?!.*(ยา|prescription|สั่งยา|diagnose|วินิจฉัย|รักษา|treatment|password|รหัสผ่าน|confidential|ลับ|secret|ข้อมูลส่วนตัว)).*$"
+             description="ห้ามให้ข้อมูลส่วนตัว คำวินิจฉัย แนะนำยา หรือข้อมูลที่มี sensitive word"/>
+    </string>
+  </output>
+</rail>

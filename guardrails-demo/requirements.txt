@@ -1,0 +1,6 @@
+openai 
+guardrails-ai 
+python-dotenv 
+langchain 
+rapidfuzz 
+pandas
