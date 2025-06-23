@@ -1,0 +1,6 @@
+<rail version="0.1">
+  <output>
+    <string name="summary"/>
+    <string name="recommendation"/>
+  </output>
+</rail>

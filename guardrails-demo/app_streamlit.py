@@ -9,7 +9,11 @@ from predict import (
     extract_symptoms_from_text,
     predict_disease_percent
 )
-from health_prompt_template import get_health_prompt_template
+from health_prompt_template import (
+    get_ai1_consistency_template,
+    get_ai2_summary_template,
+    get_ai3_doctor_reply_template,
+)
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -28,6 +32,9 @@ SYMPTOM_CSV = "./data/full_onehot_disease.csv"
 df, known_symptoms, disease_col = load_symptom_data(SYMPTOM_CSV)
 known_diseases = list(df[disease_col].unique())  # สำหรับตรวจชื่อโรค
 
+# ===== Guardrails หลายไฟล์ สำหรับแต่ละ AI
+guard_ai1 = Guard.from_rail("guardrails_spec_ai1.rail")
+guard_ai2 = Guard.from_rail("guardrails_spec_ai2.rail")
 guard = Guard.from_rail("guardrails_spec.rail")
 
 # =========================
@@ -56,6 +63,20 @@ HOW_ARE_YOU_REPLIES = [
     "ขอบคุณที่ทักมาถามนะคะ มีอะไรอยากปรึกษาเกี่ยวกับสุขภาพไหมคะ"
 ]
 
+def format_ai3_bullet(text):
+    # เพิ่มบรรทัดว่างระหว่าง bullet (•)
+    # หา bullet ที่อยู่ติดกันแล้วไม่มีเว้นวรรค
+    lines = text.split('\n')
+    new_lines = []
+    for i, line in enumerate(lines):
+        # ถ้าบรรทัดขึ้นต้นด้วย bullet
+        if line.strip().startswith('•'):
+            # ถ้าไม่ใช่บรรทัดแรก และก่อนหน้านี้ไม่เว้นวรรค
+            if i > 0 and lines[i-1].strip() != '':
+                new_lines.append('')  # แทรกบรรทัดว่าง
+        new_lines.append(line)
+    return '\n'.join(new_lines)
+
 # =========================
 def typhoon_wrapper(prompt, **kwargs):
     model = kwargs.get("model", "typhoon-v2.1-12b-instruct")
@@ -73,6 +94,48 @@ def typhoon_wrapper(prompt, **kwargs):
     )
     return response.choices[0].message.content
 
+# =============== AI 3 CHAIN ===============
+def ai_chain_consistency(user_symptoms, predicted_diseases, llm_api):
+    prompt_template = get_ai1_consistency_template()
+    prompt = prompt_template.format(
+        user_symptoms=", ".join(user_symptoms),
+        predicted_diseases="\n".join([
+            f"{i+1}. {d} {p}% (จาก {m} อาการ)" for i, (d, p, m) in enumerate(predicted_diseases)
+        ])
+    )
+    response = guard_ai1(
+        prompt=prompt,
+        llm_api=llm_api,
+        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 256}
+    )
+    return response.validated_output if response.validated_output else {}
+
+def ai_chain_summary(user_symptoms, predicted_diseases, ai1_comment, llm_api):
+    prompt_template = get_ai2_summary_template()
+    prompt = prompt_template.format(
+        user_symptoms=", ".join(user_symptoms),
+        predicted_diseases="\n".join([
+            f"{i+1}. {d} {p}% (จาก {m} อาการ)" for i, (d, p, m) in enumerate(predicted_diseases)
+        ]),
+        ai1_comment=ai1_comment or "-"
+    )
+    response = guard_ai2(
+        prompt=prompt,
+        llm_api=llm_api,
+        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 256}
+    )
+    return response.validated_output if response.validated_output else {}
+
+def ai_chain_doctor_reply(ai2_summary, ai2_recommendation, llm_api):
+    prompt_template = get_ai3_doctor_reply_template()
+    prompt = prompt_template.format(
+        ai2_summary=ai2_summary or "-",
+        ai2_recommendation=ai2_recommendation or "-"
+    )
+    response = llm_api(prompt, model="typhoon-v2.1-12b-instruct", temperature=0.2, max_new_tokens=256)
+    return response
+
+# =================== BOT ===================
 def ask_bot_streamlit(user_message, n_results=1, greeted=False):
     msg_lower = user_message.lower().strip()
 
@@ -116,7 +179,7 @@ def ask_bot_streamlit(user_message, n_results=1, greeted=False):
             "หากมีอาการผิดปกติควรปรึกษาเภสัชกรหรือแพทย์โดยตรงนะคะ"
         )
 
-    # --------- วิเคราะห์อาการ ---------
+    # --------- วิเคราะห์อาการ (AI 3 ชั้น) ---------
     matched_symptoms = extract_symptoms_from_text(user_message, known_symptoms)
     if not matched_symptoms:
         return (
@@ -125,47 +188,79 @@ def ask_bot_streamlit(user_message, n_results=1, greeted=False):
         )
 
     results = predict_disease_percent(matched_symptoms, df, disease_col)
-    n_show = 1 if n_results < 1 else n_results
+    n_show = 3 if n_results < 1 else n_results  # แสดง 3 อันดับ
     results = results[:n_show]
 
-    prompt_template = get_health_prompt_template()
-    disease_rank_str = '\n'.join([
-        f"{i+1}. {disease} {percent}% (จากอาการทั้งหมด {max_symptom})"
-        for i, (disease, percent, max_symptom) in enumerate(results)
-    ])
-    prompt = prompt_template.format(
-        symptoms=", ".join(matched_symptoms),
-        disease_ranking=disease_rank_str
-    )
+    # ========== AI Chain ==========
+    # AI1: วิเคราะห์ความสอดคล้อง
+    ai1_res = ai_chain_consistency(matched_symptoms, results, typhoon_wrapper)
+    consistency = ai1_res.get('consistency', 'unknown')
+    ai1_comment = ai1_res.get('comment', '')
 
-    response = guard(
-        prompt=prompt,
-        llm_api=typhoon_wrapper,
-        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.3, "max_new_tokens": 512}
-    )
-    if response.validated_output and isinstance(response.validated_output, dict):
-        answer = response.validated_output.get("answer")
-        if answer:
-            lines = answer.strip().split("\n")
-            if lines and ("สวัสดี" in lines[0]):
-                return "\n".join(lines[1:]).strip()
-            return answer.strip()
-    if hasattr(response, "error") and response.error:
-        return f"[ERROR] {response.error}"
-    if hasattr(response, "raw_llm_output"):
-        print("LLM raw output:", response.raw_llm_output)
-    return (
-        "ขออภัยค่ะ ดิฉันไม่สามารถตอบคำถามนี้ได้ หากคุณมีอาการผิดปกติควรปรึกษาแพทย์นะคะ"
-    )
+    # AI2: สรุปผลและแนวทางเบื้องต้น
+    ai2_res = ai_chain_summary(matched_symptoms, results, ai1_comment, typhoon_wrapper)
+    ai2_summary = ai2_res.get('summary', '')
+    ai2_recommendation = ai2_res.get('recommendation', '')
+
+    # AI3: ตอบกลับแบบหมอผู้หญิง
+    ai3_reply = ai_chain_doctor_reply(ai2_summary, ai2_recommendation, typhoon_wrapper)
+    ai3_reply = format_ai3_bullet(ai3_reply)
+    # ==== Save debug for Streamlit sidebar ====
+    st.session_state.ai1_res = ai1_res
+    st.session_state.ai2_res = ai2_res
+    st.session_state.ai3_reply = ai3_reply
+
+    return ai3_reply.strip()
 
 # ---------- Streamlit UI -----------
+
 st.set_page_config(page_title="AI Health Symptom Advisor", page_icon="💊")
+
+# ========== CSS + Messenger Bubble Layout ==========
+st.markdown("""
+<style>
+.messenger-container {max-width:700px; margin:0 auto;}
+.messenger-bubble-row {display: flex; margin-bottom: 18px;}
+.messenger-bubble {
+    padding: 10px 18px;
+    border-radius: 20px;
+    font-size: 1.10rem;
+    max-width: 72%;
+    word-break: break-word;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    min-width: 60px;
+    display:inline-block;
+}
+.messenger-bubble-user {
+    background: #3b7ddd;
+    color: #fff;
+    margin-left: auto;
+    margin-right: 0;
+    border-bottom-right-radius: 8px;
+    text-align: right;
+}
+.messenger-bubble-ai {
+    background: #e6eaf1;
+    color: #222;
+    margin-right: auto;
+    margin-left: 0;
+    border-bottom-left-radius: 8px;
+    text-align: left;
+}
+@media (prefers-color-scheme: dark) {
+    .messenger-bubble-ai {background: #232632; color: #eee;}
+    .messenger-bubble-user {background: #397cf8; color: #fff;}
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.title("💬 AI Health Symptom Advisor")
 st.markdown(
     "พิมพ์อาการหรือสอบถามข้อมูลสุขภาพเบื้องต้น (บอทจะตอบแบบผู้หญิง อ่อนโยน ไม่วินิจฉัย ไม่แนะนำยา)\n\n"
     "**หมายเหตุ:** ข้อมูลนี้เป็นเพียงคำแนะนำเบื้องต้น หากอาการไม่ดีขึ้นควรปรึกษาแพทย์"
 )
 
+# --- Session state ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "greeted" not in st.session_state:
@@ -173,20 +268,34 @@ if "greeted" not in st.session_state:
 if "pending_ai" not in st.session_state:
     st.session_state.pending_ai = False
 
-# แสดงประวัติแบบ chat bubble ซ้าย-ขวา
-for idx, msg in enumerate(st.session_state.messages):
+# ========== Messenger Bubble แทนที่ loop เดิม ==========
+st.markdown('<div class="messenger-bg">', unsafe_allow_html=True)
+st.markdown('<div class="messenger-container">', unsafe_allow_html=True)
+
+for msg in st.session_state.messages:
     if msg["role"] == "user":
-        with st.chat_message("user"):
-            st.markdown(msg["content"])
-    else:
-        with st.chat_message("ai"):
-            st.markdown(msg["content"])
+        st.markdown(
+            f'<div class="messenger-bubble-row" style="justify-content:flex-end;">'
+            f'  <div class="messenger-bubble messenger-bubble-user">{msg["content"]}</div>'
+            f'</div>', unsafe_allow_html=True)
+    elif msg["role"] == "ai":
+        st.markdown(
+            f'<div class="messenger-bubble-row" style="justify-content:flex-start;">'
+            f'  <div class="messenger-bubble messenger-bubble-ai">{msg["content"]}</div>'
+            f'</div>', unsafe_allow_html=True)
 
-# แสดง "..." bubble ถ้ากำลังรอ AI
+# --- Bubble "กำลังพิมพ์..." (AI) ---
 if st.session_state.pending_ai:
-    with st.chat_message("ai"):
-        st.markdown("กำลังพิมพ์...")
+    st.markdown(
+        '<div class="messenger-bubble-row" style="justify-content:flex-start;">'
+        '<div class="messenger-bubble messenger-bubble-ai">กำลังพิมพ์...</div>'
+        '</div>', unsafe_allow_html=True
+    )
 
+st.markdown('</div>', unsafe_allow_html=True) # .messenger-container
+st.markdown('</div>', unsafe_allow_html=True) # .messenger-bg
+
+# --- Input รับข้อความ ---
 user_input = st.chat_input("พิมพ์ข้อความของคุณที่นี่")
 
 if user_input:
@@ -194,7 +303,7 @@ if user_input:
     st.session_state.pending_ai = True
     st.rerun()  # refresh เพื่อให้ bubble "กำลังพิมพ์..." โผล่
 
-# ถ้ามี pending_ai = True และ message ล่าสุดคือ user → เรียก AI
+# --- ถ้ามี pending_ai = True และ message ล่าสุดคือ user → เรียก AI ---
 if st.session_state.pending_ai:
     user_message = [msg["content"] for msg in st.session_state.messages if msg["role"] == "user"][-1]
     bot_reply = ask_bot_streamlit(user_message, n_results=1, greeted=st.session_state.greeted)
@@ -204,3 +313,13 @@ if st.session_state.pending_ai:
         st.session_state.greeted = True
     st.session_state.pending_ai = False
     st.rerun()
+
+# --- DEBUG SIDEBAR OUTPUT ของ AI1, AI2, AI3 ---
+if "ai1_res" in st.session_state and "ai2_res" in st.session_state and "ai3_reply" in st.session_state:
+    with st.sidebar:
+        st.write("🟦 **AI1 (Consistency Check)**")
+        st.json(st.session_state.ai1_res)
+        st.write("🟩 **AI2 (Summary & Recommend)**")
+        st.json(st.session_state.ai2_res)
+        st.write("🟧 **AI3 (Doctor Reply)**")
+        st.write(st.session_state.ai3_reply)
