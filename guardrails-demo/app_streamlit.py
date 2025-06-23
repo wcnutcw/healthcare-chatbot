@@ -97,7 +97,7 @@ def ai_chain_consistency(user_symptoms, predicted_diseases, llm_api):
     response = guard_ai1(
         prompt=prompt,
         llm_api=llm_api,
-        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 256}
+        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 512}
     )
     print("AI1 Response:", response.validated_output)  # แสดงการตอบกลับจาก AI1
     return response.validated_output if response.validated_output else {}
