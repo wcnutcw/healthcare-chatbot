@@ -112,7 +112,7 @@ def ai_chain_summary(user_symptoms, predicted_diseases, ai1_comment, llm_api):
     response = guard_ai2(
         prompt=prompt,
         llm_api=llm_api,
-        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 256}
+        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 512}
     )
     return response.validated_output if response.validated_output else {}
 
@@ -122,7 +122,7 @@ def ai_chain_doctor_reply(ai2_summary, ai2_recommendation, llm_api):
         ai2_summary=ai2_summary or "-",
         ai2_recommendation=ai2_recommendation or "-"
     )
-    response = llm_api(prompt, model="typhoon-v2.1-12b-instruct", temperature=0.2, max_new_tokens=256)
+    response = llm_api(prompt, model="typhoon-v2.1-12b-instruct", temperature=0.2, max_new_tokens=512)
     return response
 
 # =========================
