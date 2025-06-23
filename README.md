@@ -58,11 +58,16 @@
    - API จะพร้อมใช้งานที่ [http://localhost:8000](http://localhost:8000)
 
 6. **รัน Frontend (Streamlit)**  
-   - ใช้คำสั่ง  
+   - ถ้าจะทดสอบกับหน้า UI ใช้คำสั่ง  
      ```
-     streamlit run app.py
+     streamlit run app_streamlit.py
      ```
    - UI จะสามารถเข้าใช้งานได้ที่ [http://localhost:8501](http://localhost:8501)
+  
+   - ถ้าจะทดสอบที่ CLI
+     ```
+     python app.py
+     ```
 
 ---
 
