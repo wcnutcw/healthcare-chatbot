@@ -1,78 +1,80 @@
 # HealthCare Chatbot
 
-ระบบแชทบอทสำหรับดูแลสุขภาพ  
-พัฒนาโดยใช้ **FastAPI** สำหรับ Back-end และ **Streamlit** สำหรับ Front-end
+Healthcare chatbot system
 
-ใช้ Guardrails สำหรับสร้าง gard คำต้องห้ามตอบ และ  LLM ใช้ Typhoon
+Developed using **FastAPI** for Back-end and **Streamlit** for Front-end
 
----
-
-## วิธีติดตั้งและใช้งานโปรเจกต์
-
-1. **สร้าง Virtual Environment**
-
-   - **สำหรับ Windows**  
-     เปิด Command Prompt แล้วรันคำสั่ง  
-     ```
-     py -3.12 -m venv venv
-     ```
-
-   - **สำหรับ macOS / Linux**  
-     เปิด Terminal แล้วรันคำสั่ง  
-     ```
-     python3 -m venv venv
-     ```
-   และสร้างไฟล์ .env พร้อมใส่
-  ```  TYPHOON_API_KEY= your_key```
-  รับ api_key มาจาก https://playground.opentyphoon.ai/api-key
-3. **ติดตั้งไลบรารีที่จำเป็น**  
-   - ให้เข้าไปที่ Virtual Environment (activate venv) ก่อน  
-     - **Windows:**  
-       ```
-       venv\Scripts\activate
-       ```
-     - **macOS / Linux:**  
-       ```
-       source venv/bin/activate
-       ```
-   - จากนั้นติดตั้ง dependencies ด้วยคำสั่ง  
-     ```
-     pip install -r requirements.txt
-     ```
-
-4. **เปิดใช้งาน Virtual Environment (ทุกครั้งก่อนรันโปรแกรม)**  
-   - **Windows:**  
-     ```
-     venv\Scripts\activate
-     ```
-   - **macOS / Linux:**  
-     ```
-     source venv/bin/activate
-     ```
-
-5. **รัน Backend (FastAPI)**  
-   - ใช้คำสั่ง  
-     ```
-     uvicorn main:app --reload
-     ```
-   - API จะพร้อมใช้งานที่ [http://localhost:8000](http://localhost:8000)
-
-6. **รัน Frontend (Streamlit)**  
-   - ถ้าจะทดสอบกับหน้า UI ใช้คำสั่ง  
-     ```
-     streamlit run app_streamlit.py
-     ```
-   - UI จะสามารถเข้าใช้งานได้ที่ [http://localhost:8501](http://localhost:8501)
-  
-   - ถ้าจะทดสอบที่ CLI
-     ```
-     python app.py
-     ```
+Use Guardrails to create gard, forbidden words to answer, and LLM use Typhoon
 
 ---
 
-> **หมายเหตุ**  
-> - ทุกครั้งที่รัน backend หรือ frontend ต้อง activate venv ก่อนเสมอ  
-> - แนะนำให้เพิ่ม `venv/` ลงในไฟล์ `.gitignore` เพื่อป้องกันไม่ให้ push venv ขึ้น GitHub
-> - อย่าลืมอัพไฟล์ custom_cnn_dfu_model.h5 ลงไป เพราะใช้เป็นข้อมูลในการ predict
+## How to install and use the project
 
+1. **Create a Virtual Environment**
+
+- **For Windows**
+
+Open Command Prompt and run the command
+```
+py -3.12 -m venv venv
+```
+*Note: Use python ver 3.12.x, but don't worry, just run it in the folder of venv that supports this version
+*Can still use version 3.13.x as usual, just run in the venv folder
+- **For macOS / Linux**
+Open Terminal and run the command
+```
+python3 -m venv venv
+```
+and create a .env file with
+``` TYPHOON_API_KEY= your_key```
+Get the api_key from https://playground.opentyphoon.ai/api-key
+3. **Install the required libraries**
+- Go to the Virtual Environment (activate venv) first
+- **Windows:**
+```
+venv\Scripts\activate
+```
+- **macOS / Linux:**
+```
+source venv/bin/activate
+```
+- Then install dependencies with the command
+```
+pip install -r requirements.txt
+```
+
+4. **Activate the Virtual Environment (Every time before running the program)**
+- **Windows:**
+```
+venv\Scripts\activate
+```
+- **macOS / Linux:**
+```
+source venv/bin/activate
+```
+
+5. **Run Backend (FastAPI)**
+- Use the command
+```
+uvicorn main:app --reload
+```
+- The API will be available at [http://localhost:8000](http://localhost:8000)
+
+6. **Run Frontend (Streamlit)**
+- If you want to test with the UI page, use the command
+```
+streamlit run app_streamlit.py
+```
+- The UI will be accessible at [http://localhost:8501](http://localhost:8501)
+
+- If you want to test at CLI
+```
+python app.py
+```
+
+---
+
+> **Note**
+> - Every time you run backend or frontend, you must activate venv first.
+> - It is recommended to add `venv/` to the `.gitignore` file to prevent pushing venv to GitHub.
+> - Don't forget to upload the custom_cnn_dfu_model.h5 file because it is used as data for prediction.
