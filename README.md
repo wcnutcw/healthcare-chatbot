@@ -74,4 +74,5 @@
 > **หมายเหตุ**  
 > - ทุกครั้งที่รัน backend หรือ frontend ต้อง activate venv ก่อนเสมอ  
 > - แนะนำให้เพิ่ม `venv/` ลงในไฟล์ `.gitignore` เพื่อป้องกันไม่ให้ push venv ขึ้น GitHub
+> - อย่าลืมอัพไฟล์ custom_cnn_dfu_model.h5 ลงไป เพราะใช้เป็นข้อมูลในการ predict
 
