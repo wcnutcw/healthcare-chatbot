@@ -104,7 +104,7 @@ def typhoon_wrapper(prompt, **kwargs):
 def ai_chain_consistency(user_symptoms, predicted_diseases, llm_api, json_file):
     json_data = json_file
     disease_info = json_data
-    predicted_diseases_str = "\n".join([f"{i+1}. {d['โรค']} {p}% (จาก {m} อาการ)" for i, (d, p, m) in enumerate(predicted_diseases)])
+    predicted_diseases_str = "\n".join([f"{i+1}. {d} {p}% (จาก {m} อาการ)" for i, (d, p, m) in enumerate(predicted_diseases)])
     prompt_template = get_ai1_consistency_template()
     prompt = prompt_template.format(
         user_symptoms=", ".join(user_symptoms),
@@ -378,16 +378,20 @@ if st.session_state.pending_ai:
     st.session_state.pending_ai = False
     st.rerun()
 
-# --- DEBUG ---  
-if "ai1_res" in st.session_state and "ai2_res" in st.session_state and "ai3_reply" in st.session_state:
-    with st.expander("🛠️ Debug Information"):
-        st.write("🟦 **AI1 (Consistency Check)**")
+# --- DEBUG --- (แสดงผลใน sidebar แยกจากวิเคราะห์ผิวหนัง)
+with st.sidebar.expander("🛠️ DEBUG - รายละเอียดการประมวลผล", expanded=False):
+    if "ai1_res" in st.session_state:
+        st.markdown("🟦 **AI1 (Consistency Check)**")
         st.json(st.session_state.ai1_res)
-        st.write("🟩 **AI2 (Summary & Recommend)**")
+    
+    if "ai2_res" in st.session_state:
+        st.markdown("🟩 **AI2 (Summary & Recommend)**")
         st.json(st.session_state.ai2_res)
-        st.write("🟧 **AI3 (Doctor Reply - Text)**")
+    
+    if "ai3_reply" in st.session_state:
+        st.markdown("🟧 **AI3 (Doctor Reply - Text)**")
         st.write(st.session_state.ai3_reply)
-        
-        if st.session_state.ai3_skin_reply:
-            st.write("🟪 **AI3 (Doctor Reply - Skin Image Analysis)**")
-            st.write(st.session_state.ai3_skin_reply)
+
+    if "ai3_skin_reply" in st.session_state and st.session_state.ai3_skin_reply:
+        st.markdown("🟪 **AI3 (Doctor Reply - Skin Image Analysis)**")
+        st.write(st.session_state.ai3_skin_reply)
