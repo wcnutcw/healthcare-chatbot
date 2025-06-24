@@ -4,6 +4,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import random
+import json
 from predict import (
     load_symptom_data,
     extract_symptoms_from_text,
@@ -13,8 +14,12 @@ from health_prompt_template import (
     get_ai1_consistency_template,
     get_ai2_summary_template,
     get_ai3_doctor_reply_template,
+    get_skin_image_summary_template,
 )
+from skin_model_predict import predict_skin_disease
 import warnings
+from PIL import Image
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # โหลด .env
@@ -63,6 +68,14 @@ HOW_ARE_YOU_REPLIES = [
     "ขอบคุณที่ทักมาถามนะคะ มีอะไรอยากปรึกษาเกี่ยวกับสุขภาพไหมคะ"
 ]
 
+def load_json_file(file_path):
+    with open(file_path, "r", encoding="utf-8") as file:
+        return json.load(file)
+
+def convert_json_to_str(json_data):
+    # ใช้ json.dumps() เพื่อแปลงข้อมูลทุกอย่างใน JSON เป็น string
+    return json.dumps(json_data, ensure_ascii=False)
+
 def format_ai3_bullet(text):
     lines = text.split('\n')
     new_lines = []
@@ -88,18 +101,21 @@ def typhoon_wrapper(prompt, **kwargs):
     return response.choices[0].message.content
 
 # ================= AI 3 CHAIN =================
-def ai_chain_consistency(user_symptoms, predicted_diseases, llm_api):
+def ai_chain_consistency(user_symptoms, predicted_diseases, llm_api, json_file):
+    json_data = json_file
+    disease_info = json_data
+    predicted_diseases_str = "\n".join([f"{i+1}. {d['โรค']} {p}% (จาก {m} อาการ)" for i, (d, p, m) in enumerate(predicted_diseases)])
     prompt_template = get_ai1_consistency_template()
     prompt = prompt_template.format(
         user_symptoms=", ".join(user_symptoms),
-        predicted_diseases="\n".join([f"{i+1}. {d} {p}% (จาก {m} อาการ)" for i, (d, p, m) in enumerate(predicted_diseases)])
+        predicted_diseases=predicted_diseases_str,
+        json_data=disease_info
     )
     response = guard_ai1(
         prompt=prompt,
         llm_api=llm_api,
-        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 512}
+        llm_params={"model": "typhoon-v2.1-12b-instruct", "temperature": 0.2, "max_new_tokens": 256}
     )
-    print("AI1 Response:", response.validated_output)  # แสดงการตอบกลับจาก AI1
     return response.validated_output if response.validated_output else {}
 
 def ai_chain_summary(user_symptoms, predicted_diseases, ai1_comment, llm_api):
@@ -122,6 +138,32 @@ def ai_chain_doctor_reply(ai2_summary, ai2_recommendation, llm_api):
         ai2_summary=ai2_summary or "-",
         ai2_recommendation=ai2_recommendation or "-"
     )
+    response = llm_api(prompt, model="typhoon-v2.1-12b-instruct", temperature=0.2, max_new_tokens=512)
+    return response
+
+# ================= NEW: AI CHAIN FOR SKIN DISEASE =================
+def ai_chain_skin_summary(image_class, confidence, llm_api):
+    """สร้างสรุปและคำแนะนำเบื้องต้นสำหรับการวิเคราะห์ภาพผิวหนัง"""
+    if image_class == "Abnormal(Ulcer)":
+        ai2_summary = f"จากการวิเคราะห์ภาพ พบลักษณะผิดปกติที่อาจเป็นแผลหรือรอยโรคผิวหนัง (ความมั่นใจ {confidence:.1%})"
+        ai2_recommendation = "ควรปรึกษาแพทย์ผิวหนังเพื่อรับการตรวจและรักษาที่เหมาะสม"
+    else:  # Normal(Healthy skin)
+        ai2_summary = f"จากการวิเคราะห์ภาพ ผิวหนังดูปกติ (ความมั่นใจ {confidence:.1%})"
+        ai2_recommendation = "ควรดูแลรักษาความสะอาดและความชุ่มชื้นของผิวหนังต่อไป"
+    
+    return ai2_summary, ai2_recommendation
+
+def ai_chain_skin_doctor_reply(image_class, confidence, llm_api):
+    """สร้างคำตอบจากหมอสำหรับการวิเคราะห์ภาพผิวหนัง"""
+    ai2_summary, ai2_recommendation = ai_chain_skin_summary(image_class, confidence, llm_api)
+    
+    prompt_template = get_skin_image_summary_template()
+    prompt = prompt_template.format(
+        image_class=f"{image_class} (ความมั่นใจ {confidence:.1%})",
+        ai2_summary=ai2_summary,
+        ai2_recommendation=ai2_recommendation
+    )
+    
     response = llm_api(prompt, model="typhoon-v2.1-12b-instruct", temperature=0.2, max_new_tokens=512)
     return response
 
@@ -164,8 +206,10 @@ def ask_bot_streamlit(user_message, n_results=1, greeted=False):
     n_show = 3 if n_results < 1 else n_results
     results = results[:n_show]
 
-    ai1_res = ai_chain_consistency(matched_symptoms, results, typhoon_wrapper)
-    consistency = ai1_res.get('consistency', 'unknown')
+    json_file_path = './symptoms_data.json'
+    json_data = load_json_file(json_file_path)
+    json_data_str = convert_json_to_str(json_data)
+    ai1_res = ai_chain_consistency(matched_symptoms, results, typhoon_wrapper, json_data_str)
     ai1_comment = ai1_res.get('comment', '')
 
     ai2_res = ai_chain_summary(matched_symptoms, results, ai1_comment, typhoon_wrapper)
@@ -235,6 +279,12 @@ if "greeted" not in st.session_state:
 if "pending_ai" not in st.session_state:
     st.session_state.pending_ai = False
 
+# **เพิ่มตัวแปรเก็บผลวิเคราะห์ภาพ**
+if "ai3_skin_reply" not in st.session_state:
+    st.session_state.ai3_skin_reply = ""
+if "skin_analysis_result" not in st.session_state:
+    st.session_state.skin_analysis_result = None
+
 # ----------------- Messenger Bubble Layout ----------------
 st.markdown('<div class="messenger-bg">', unsafe_allow_html=True)
 st.markdown('<div class="messenger-container">', unsafe_allow_html=True)
@@ -261,12 +311,62 @@ if st.session_state.pending_ai:
 st.markdown('</div>', unsafe_allow_html=True) # .messenger-container
 st.markdown('</div>', unsafe_allow_html=True) # .messenger-bg
 
+# --- เพิ่ม UI อัปโหลดรูปภาพสำหรับวิเคราะห์ ---
+st.sidebar.title("🔬 วิเคราะห์โรคผิวหนังจากรูปภาพ")
+st.sidebar.markdown("อัปโหลดภาพผิวหนังเพื่อให้ AI วิเคราะห์เบื้องต้น")
+
+uploaded_file = st.sidebar.file_uploader("เลือกรูปภาพผิวหนัง", type=["png", "jpg", "jpeg"])
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.sidebar.image(image, caption="ภาพที่อัปโหลด", use_container_width=True)
+
+    if st.sidebar.button("🔍 วิเคราะห์ภาพ", type="primary"):
+        with st.spinner("กำลังวิเคราะห์ภาพ..."):
+            try:
+                predicted_class, confidence = predict_skin_disease(image)
+                
+                # สร้างคำตอบจาก AI Doctor
+                skin_ai3_reply = ai_chain_skin_doctor_reply(predicted_class, confidence, typhoon_wrapper)
+                skin_ai3_reply = format_ai3_bullet(skin_ai3_reply)
+                
+                # เก็บผลลัพธ์ใน session state
+                st.session_state.ai3_skin_reply = skin_ai3_reply
+                st.session_state.skin_analysis_result = {
+                    "predicted_class": predicted_class,
+                    "confidence": confidence,
+                    "reply": skin_ai3_reply
+                }
+                
+                st.sidebar.success("✅ วิเคราะห์เสร็จแล้ว!")
+                
+            except Exception as e:
+                st.sidebar.error(f"❌ เกิดข้อผิดพลาด: {str(e)}")
+
+# แสดงผลการวิเคราะห์ภาพ
+if st.session_state.skin_analysis_result:
+    st.sidebar.markdown("### 📋 ผลการวิเคราะห์")
+    result = st.session_state.skin_analysis_result
+    
+    # แสดงผลการจำแนกประเภท
+    if result["predicted_class"] == "Abnormal(Ulcer)":
+        st.sidebar.warning(f"⚠️ **พบความผิดปกติ**")
+    else:
+        st.sidebar.success(f"✅ **ผิวหนังปกติ**")
+    
+    st.sidebar.info(f"ความมั่นใจ: {result['confidence']:.1%}")
+    
+    # แสดงคำแนะนำจากหมอ
+    st.sidebar.markdown("### 💬 คำแนะนำจากแพทย์ AI")
+    st.sidebar.markdown(result["reply"])
+
+# แชทปกติ
 user_input = st.chat_input("พิมพ์ข้อความของคุณที่นี่")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.session_state.pending_ai = True
-    st.rerun()  # refresh
+    st.rerun()
 
 if st.session_state.pending_ai:
     user_message = [msg["content"] for msg in st.session_state.messages if msg["role"] == "user"][-1]
@@ -280,10 +380,14 @@ if st.session_state.pending_ai:
 
 # --- DEBUG ---  
 if "ai1_res" in st.session_state and "ai2_res" in st.session_state and "ai3_reply" in st.session_state:
-    with st.sidebar:
+    with st.expander("🛠️ Debug Information"):
         st.write("🟦 **AI1 (Consistency Check)**")
         st.json(st.session_state.ai1_res)
         st.write("🟩 **AI2 (Summary & Recommend)**")
         st.json(st.session_state.ai2_res)
-        st.write("🟧 **AI3 (Doctor Reply)**")
+        st.write("🟧 **AI3 (Doctor Reply - Text)**")
         st.write(st.session_state.ai3_reply)
+        
+        if st.session_state.ai3_skin_reply:
+            st.write("🟪 **AI3 (Doctor Reply - Skin Image Analysis)**")
+            st.write(st.session_state.ai3_skin_reply)
