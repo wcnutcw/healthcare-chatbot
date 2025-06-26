@@ -1,5 +1,5 @@
 openai 
-guardrails-ai=0.5.15
+guardrails-ai==0.5.15
 python-dotenv 
 langchain 
 rapidfuzz 
